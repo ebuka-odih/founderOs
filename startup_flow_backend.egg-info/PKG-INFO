@@ -1,0 +1,117 @@
+Metadata-Version: 2.4
+Name: startup-flow-backend
+Version: 0.1.0
+Summary: FastAPI backend for the FounderOs validation platform.
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi<1.0,>=0.111.0
+Requires-Dist: uvicorn<0.31.0,>=0.29.0
+Provides-Extra: dev
+Requires-Dist: pytest<9.0,>=8.3.0; extra == "dev"
+Requires-Dist: httpx<0.28,>=0.27.0; extra == "dev"
+
+# 🧠 Project: FounderOs – AI Startup Validation Platform
+
+## 📘 Overview
+
+**FounderOs** is an AI-driven platform that helps founders validate startup ideas from concept to funding readiness.  
+The system breaks down validation into **structured stages**, where each stage processes user input and generates a **beautifully formatted HTML report**.
+
+Unlike a chat interface, FounderOs uses a **guided, step-based UI** that ensures clarity, structure, and actionable feedback.
+
+Each stage is powered by **AI agents** working behind the scenes — analyzing, researching, evaluating, and synthesizing outputs.
+
+---
+
+## 🎯 Core Objective
+
+To provide an **interactive AI workspace** for startup validation by:
+1. Allowing users to input startup ideas in structured stages.
+2. Running AI-powered validation pipelines (through agents).
+3. Displaying the results in HTML format — ready to view, save, or download.
+4. Eventually expanding to a conversational (ChatGPT-style) mode in Phase 2.
+
+---
+
+## ⚙️ System Architecture
+
+### 🧩 Tech Stack
+
+- **Frontend:** Next.js + Tailwind CSS + ShadCN UI
+- **Backend:** FastAPI (Python)
+- **AI Core:** OpenAI GPT-4/5 or Anthropic Claude via LangChain or custom orchestrator
+- **Database:** PostgreSQL (via Prisma or SQLAlchemy)
+- **Hosting:** Dockerized microservices on DigitalOcean, AWS, or Vercel
+
+---
+
+## 🧭 Backend Overview (FastAPI)
+
+The backend serves as the **central orchestrator** for all AI operations and validation flows.  
+It manages agent pipelines, user requests, and generates the final HTML output.
+
+### Responsibilities
+- Handle stage-specific API endpoints (idea, market, competitors, etc.)
+- Orchestrate agent chains for reasoning and research
+- Manage AI context memory
+- Return structured HTML responses to the frontend
+
+### Example Endpoints
+- `POST /validate/idea` → triggers AI agents for idea validation
+- `POST /validate/problem-fit`
+- `POST /validate/market`
+- `POST /validate/mvp`
+- `POST /validate/funding`
+- `GET /report/:session_id` → returns combined HTML report
+
+Each route corresponds to a **validation stage** and invokes a chain of AI agents.
+
+---
+
+## 🤖 Agent System (Backend AI Logic)
+
+Each validation stage is powered by a set of **autonomous but cooperative AI agents**.  
+They communicate through a shared orchestrator that coordinates task execution and passes results between them.
+
+### Example Agent Chain (for Problem & Solution Fit)
+
+1. **IdeaParserAgent**
+   - Extracts key details from the user’s description.
+   - Output example:
+     ```json
+     {
+       "problem": "hard to find trusted artisans",
+       "solution": "platform to match verified artisans"
+     }
+     ```
+
+2. **ResearchAgent**
+   - Searches for market data, competitor trends, and demand metrics.
+   - Output example:
+     ```json
+     {
+       "competitors": ["Thumbtack", "TaskRabbit"],
+       "market_demand": "rising interest in local service platforms"
+     }
+     ```
+
+3. **EvaluatorAgent**
+   - Analyzes the combined data and gives a feasibility score, insights, and advice.
+   - Produces raw markdown or structured JSON ready for formatting.
+
+4. **FormatterAgent**
+   - Converts final data into a styled HTML block.
+   - Ensures consistency in layout and color scheme.
+
+---
+
+### Agent Workflow Diagram
+
+```mermaid
+flowchart LR
+    U[User Input] --> F(FastAPI Orchestrator)
+    F --> A1[IdeaParserAgent]
+    A1 --> A2[ResearchAgent]
+    A2 --> A3[EvaluatorAgent]
+    A3 --> A4[FormatterAgent]
+    A4 -->|HTML Response| UI[Next.js Frontend]

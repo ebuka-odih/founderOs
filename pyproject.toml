@@ -1,0 +1,20 @@
+[project]
+name = "startup-flow-backend"
+version = "0.1.0"
+description = "FastAPI backend for the FounderOs validation platform."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.111.0,<1.0",
+    "uvicorn>=0.29.0,<0.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0,<9.0",
+    "httpx>=0.27.0,<0.28",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

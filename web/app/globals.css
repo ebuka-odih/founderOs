@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply min-h-screen bg-muted text-textPrimary antialiased;
+  font-feature-settings: "liga" 1, "kern" 1;
+}
+
+a {
+  @apply text-accent hover:text-indigo-500 transition-colors;
+}
+
+button {
+  @apply rounded-md font-medium transition-colors;
+}
