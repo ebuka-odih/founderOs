@@ -13,7 +13,6 @@ client = TestClient(create_app())
 def _sample_payload() -> dict[str, object]:
     return {
         "prompt": "A platform that helps remote teams align around focused weekly outcomes using AI coaches.",
-        "clone": FounderClone.NANCY.value,
         "session_id": "demo-session",
     }
 
@@ -43,6 +42,7 @@ def test_list_personas_exposes_founder_clones() -> None:
 @pytest.mark.parametrize("stage", [stage.value for stage in BusinessStage])
 def test_generate_stage_returns_markdown(stage: str) -> None:
     payload = _sample_payload()
+    payload["clone"] = FounderClone.NANCY.value
     response = client.post(f"/journey/{stage}", json=payload)
 
     assert response.status_code == 200
@@ -54,6 +54,7 @@ def test_generate_stage_returns_markdown(stage: str) -> None:
 
 def test_session_endpoint_returns_combined_markdown() -> None:
     payload = _sample_payload()
+    payload["clone"] = FounderClone.NANCY.value
     client.post(f"/journey/{BusinessStage.IDEATION.value}", json=payload)
     client.post(f"/journey/{BusinessStage.VALIDATION.value}", json=payload)
 
@@ -63,3 +64,21 @@ def test_session_endpoint_returns_combined_markdown() -> None:
     assert data["session_id"] == "demo-session"
     assert set(data["stages"]) >= {BusinessStage.IDEATION.value, BusinessStage.VALIDATION.value}
     assert data["combined_markdown"].count("##") >= 2
+
+
+def test_run_full_journey_returns_all_stages() -> None:
+    payload = _sample_payload()
+    response = client.post("/journey/run", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == payload["session_id"]
+    assert len(data["stages"]) == len(BusinessStage)
+    assert data["combined_markdown"].count("##") >= len(BusinessStage)
+def test_generate_stage_defaults_clone_when_missing() -> None:
+    payload = _sample_payload()
+    response = client.post(f"/journey/{BusinessStage.IDEATION.value}", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["clone"] == FounderClone.NANCY.value

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ..journey import generate_stage, list_personas, list_stage_definitions
+from ..journey import generate_stage, list_personas, list_stage_definitions, run_full_journey
 from ..memory import session_memory
 from ..schemas import (
     BusinessStage,
+    JourneyRunRequest,
+    JourneyRunResponse,
     PersonaDefinition,
     SessionResponse,
     StageDefinition,
@@ -38,6 +40,15 @@ async def list_personas_endpoint() -> list[PersonaDefinition]:
     """Expose founder clone profiles to the UI."""
 
     return list_personas()
+
+
+@router.post("/run", response_model=JourneyRunResponse)
+async def run_journey(payload: JourneyRunRequest) -> JourneyRunResponse:
+    """Execute the full multi-stage pipeline in a single request."""
+
+    stages, combined = run_full_journey(payload.prompt, payload.clone, payload.session_id)
+    session_id = payload.session_id or "sessionless"
+    return JourneyRunResponse(session_id=session_id, stages=stages, combined_markdown=combined)
 
 
 @router.post("/{stage}", response_model=StageResponse)

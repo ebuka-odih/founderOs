@@ -7,9 +7,12 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Dict, Mapping
 
+from dotenv import load_dotenv
 
 OTHER_PROVIDER_PREFIX = "FOUNDEROS_LLM_"
 OTHER_PROVIDER_SUFFIX = "_API_KEY"
+
+load_dotenv(override=False)
 
 
 @dataclass(frozen=True)

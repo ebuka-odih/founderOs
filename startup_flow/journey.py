@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Tuple
 
@@ -9,6 +10,8 @@ import math
 import re
 from collections import Counter
 
+from .llm import PersonaSnapshot, generate_stage_structured
+from .memory import session_memory
 from .schemas import (
     BusinessStage,
     FounderClone,
@@ -59,6 +62,20 @@ PERSONAS: Dict[FounderClone, PersonaProfile] = {
     ),
 }
 
+DEFAULT_CLONE = FounderClone.NANCY
+
+
+def _persona_snapshot(persona: PersonaProfile) -> PersonaSnapshot:
+    """Adapt the persona for the LLM module."""
+
+    return PersonaSnapshot(
+        id=persona.id.value,
+        label=persona.label,
+        tagline=persona.tagline,
+        tone=persona.tone,
+        strategic_bias=persona.strategic_bias,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Stage infrastructure
@@ -74,6 +91,7 @@ class StageContext:
     keywords: List[str]
     context_markdown: str | None
     context_summary: str | None
+    context_structured: Dict[str, object] | None
 
 
 @dataclass(frozen=True)
@@ -130,6 +148,17 @@ STOP_WORDS = {
     "customer",
     "customers",
 }
+
+
+def _structured_to_text(data: Dict[str, object] | None) -> str:
+    """Serialize structured context into a keyword-friendly text blob."""
+
+    if not data:
+        return ""
+    try:
+        return json.dumps(data, ensure_ascii=False)
+    except TypeError:
+        return str(data)
 
 
 def _extract_keywords(*texts: str, max_terms: int = 5) -> List[str]:
@@ -316,9 +345,9 @@ def _generate_planning(context: StageContext) -> StageArtifacts:
     if len(keywords) > 1:
         mvp_scope.append(f"Instrument {_titleize(keywords[1])} signals to showcase early proof.")
 
-    roadmap = []
+    product_roadmap = []
     for index, keyword in enumerate(keywords[:3]):
-        roadmap.append(
+        product_roadmap.append(
             {
                 "phase": f"Phase {index + 1}: {_titleize(keyword)} focus",
                 "objectives": [
@@ -335,26 +364,26 @@ def _generate_planning(context: StageContext) -> StageArtifacts:
         {"role": "Customer Strategist", "responsibility": "Own user discovery and convert insights into roadmaps."},
     ]
 
-    tools = [
-        "Collaboration suite (Notion or Linear) for backlog clarity.",
-        "Experiment tracking (Airtable, GSheets) to visualise learning cadence.",
-        "Analytics instrumentation (Amplitude, PostHog) for behaviour signals.",
-    ]
+    resource_estimates = {
+        "estimated_budget_usd": f"{_scale_currency(65_000 + len(keywords) * 12_000)} over first two quarters.",
+        "tools_and_stack": [
+            "Collaboration suite (Notion or Linear) for backlog clarity.",
+            "Experiment tracking (Airtable, GSheets) to visualise learning cadence.",
+            "Analytics instrumentation (Amplitude, PostHog) for behaviour signals.",
+        ],
+    }
 
     structured = {
-        "plan_scope": mvp_scope,
-        "delivery_roadmap": roadmap,
+        "mvp_scope": mvp_scope,
+        "product_roadmap": product_roadmap,
         "team_requirements": team_requirements,
-        "resource_plan": {
-            "estimated_budget_usd": f"{_scale_currency(65_000 + len(keywords) * 12_000)} over first two quarters.",
-            "tools_and_stack": tools,
-        },
-        "enablement_artifacts": [
+        "resource_estimates": resource_estimates,
+        "documentation_to_prepare": [
             "Discovery log that captures hypotheses, experiments, and decisions.",
             "Customer storyboards for onboarding and first-win experience.",
             "Risk register aligned with the most sensitive assumptions.",
         ],
-        "risks_and_dependencies": [
+        "key_risks_and_dependencies": [
             f"Dependency on {_titleize(keywords[0])} data quality — mitigate with manual assurance during pilot.",
             "Capacity risk if execution velocity stalls — reserve buffer sprint for hardening work.",
         ],
@@ -370,41 +399,89 @@ def _generate_strategy(context: StageContext) -> StageArtifacts:
     persona = context.persona
     keywords = context.keywords
 
-    structured = {
-        "vision_statement": (
-            f"Become the go-to choice for {_titleize(keywords[0])} outcomes while staying true to "
-            f"{persona.strategic_bias}."
+    focus_keyword = _titleize(keywords[0])
+    aux_keyword = _titleize(keywords[1]) if len(keywords) > 1 else "differentiation"
+
+    business_plan = {
+        "executive_summary": (
+            f"{persona.label} frames {focus_keyword} as the wedge to build a durable company that compounds learning "
+            f"from early adopters into a category-defining platform."
         ),
-        "market_positioning": (
-            f"Position as the {persona.tone} category leader that marries {_titleize(keywords[1] if len(keywords) > 1 else keywords[0])} "
-            f"with effortless execution."
+        "problem_and_solution": (
+            f"Founders struggle to activate {focus_keyword} workflows with the right mix of tooling and judgement. "
+            f"The solution blends {persona.strategic_bias} with hands-on enablement."
         ),
-        "go_to_market": (
-            f"Sequence a land-and-expand motion: start with a proof-of-value pilot, publish tangible wins, "
-            f"then layer channel partnerships aligned with {_titleize(keywords[-1]) if keywords else 'strategic allies'}."
+        "market_analysis": (
+            f"Signals show {focus_keyword} demand growing across adjacent industries. {_titleize(aux_keyword)} "
+            "remains under-served, creating a window for a focused entrant."
         ),
-        "customer_experience": (
-            "Map end-to-end rituals from first touch to renewal, instrumenting every milestone with signals "
-            "that feed the roadmap backlog."
+        "product_and_services": (
+            f"Core platform with playbooks, automation, and services that embed best practices for {focus_keyword}."
         ),
-        "strategic_pillars": [
-            f"{_titleize(keyword)} leadership through opinionated product moments."
-            for keyword in keywords[:3]
-        ],
-        "success_metrics": [
-            "Activation-to-value time under 10 days.",
-            "Net retention above 120% after first renewal cycle.",
-            "Cost to serve per customer shrinking each quarter.",
-        ],
-        "partnerships": [
-            f"Co-build alliances with {_titleize(keywords[0])} ecosystem players.",
-            "Advisory circle of power users to pressure-test roadmap priorities.",
-        ],
+        "operations_plan": (
+            "Operate as a lean pod: product, go-to-market, and customer strategy collaborate around a shared scorecard."
+        ),
+        "team_and_roles": (
+            "Founding trio covering product, technical execution, and customer development with fractional specialists."
+        ),
+        "marketing_strategy": (
+            f"Anchor storytelling around {focus_keyword} wins, leaning on persona-led narratives and partner validation."
+        ),
+        "growth_opportunity": (
+            f"Expand into neighbouring segments once {focus_keyword} category leadership is established."
+        ),
     }
 
-    summary = (
-        f"{persona.label} sets a strategy that keeps {_titleize(keywords[0])} front and centre with measurable guardrails."
-    )
+    financial_model = {
+        "revenue_streams": [
+            "Subscription platform access",
+            "Advisory sprints for complex deployments",
+            "Performance-based success fees with pilot customers",
+        ],
+        "pricing_strategy": "Tiered model with proof-of-value pilot leading into annual contracts.",
+        "cost_structure": [
+            "Product and engineering",
+            "GTM and enablement",
+            "Customer success and community programs",
+        ],
+        "revenue_projection_usd": {
+            "year_1": 500_000,
+            "year_2": 1_400_000,
+            "year_3": 3_000_000,
+        },
+        "profitability_forecast": "Breakeven near end of Year 3 with disciplined CAC payback targets.",
+        "funding_needed_usd": "$1.2M seed to fund 18 months of runway.",
+    }
+
+    investor_readiness = {
+        "funding_round_type": "Pre-seed / Seed",
+        "ideal_investor_profile": (
+            "Operator-angel or early-stage fund with deep conviction in future-of-work and workflow tooling."
+        ),
+        "funding_use_plan": [
+            "Accelerate product roadmap tied to {focus_keyword} differentiation".format(focus_keyword=focus_keyword),
+            "Build customer experience pods for lighthouse accounts",
+            "Invest in measurement instrumentation for ROI storytelling",
+        ],
+        "pitch_focus_points": [
+            f"Category insight into {focus_keyword}",
+            f"Unique persona-driven approach championed by {persona.label}",
+            "Evidence of rapid learning loops and engaged design partners",
+        ],
+        "risk_analysis": [
+            "Time-to-value risk if onboarding is complex",
+            "Talent risk if specialist roles are hard to hire",
+        ],
+        "overall_readiness_score": "7 / 10 — compelling wedge with clear plan to validate capital efficiency.",
+    }
+
+    structured = {
+        "business_plan": business_plan,
+        "financial_model": financial_model,
+        "investor_readiness": investor_readiness,
+    }
+
+    summary = business_plan["executive_summary"]
     return StageArtifacts(structured=structured, summary=summary)
 
 
@@ -497,7 +574,7 @@ def _format_ideation_markdown(data: Dict[str, object]) -> str:
     return "\n\n".join(
         section
         for section in [
-            f"## Concept Summary\n\n{data.get('summary', '')}",
+            f"## Summary\n\n{data.get('summary', '')}",
             f"## Problem Statement\n\n{data.get('problem_statement', '')}" if data.get("problem_statement") else "",
             f"## Target Audience\n\n{_bullet_list(data.get('target_audience', []))}" if data.get("target_audience") else "",
             f"## Unique Value Proposition\n\n{data.get('unique_value_proposition', '')}"
@@ -548,7 +625,7 @@ def _format_validation_markdown(data: Dict[str, object]) -> str:
 
 def _format_planning_markdown(data: Dict[str, object]) -> str:
     roadmap_sections = []
-    for phase in data.get("delivery_roadmap", []):
+    for phase in data.get("product_roadmap", []):
         lines = [f"**{phase.get('phase', 'Phase')}**"]
         if phase.get("expected_duration_weeks"):
             lines.append(f"*Duration:* {phase['expected_duration_weeks']} weeks")
@@ -561,23 +638,83 @@ def _format_planning_markdown(data: Dict[str, object]) -> str:
         for member in data.get("team_requirements", [])
     ]
 
-    resources = data.get("resource_plan", {})
+    resources = data.get("resource_estimates", {})
     tools_block = _bullet_list(resources.get("tools_and_stack", [])) if resources.get("tools_and_stack") else ""
 
     return "\n\n".join(
         section
         for section in [
-            f"## Plan Scope\n\n{_bullet_list(data.get('plan_scope', []))}" if data.get("plan_scope") else "",
-            f"## Delivery Roadmap\n\n{'\n\n'.join(roadmap_sections)}" if roadmap_sections else "",
+            f"## MVP Scope\n\n{_bullet_list(data.get('mvp_scope', []))}" if data.get("mvp_scope") else "",
+            f"## Product Roadmap\n\n{'\n\n'.join(roadmap_sections)}" if roadmap_sections else "",
             f"## Team Requirements\n\n{_bullet_list(team_lines)}" if team_lines else "",
-            f"## Resource Plan\n\n{resources.get('estimated_budget_usd', '')}" if resources.get("estimated_budget_usd") else "",
+            f"## Resource Estimates\n\n{resources.get('estimated_budget_usd', '')}" if resources.get("estimated_budget_usd") else "",
             f"### Tools & Stack\n\n{tools_block}" if tools_block else "",
-            f"## Enablement Artifacts\n\n{_bullet_list(data.get('enablement_artifacts', []))}"
-            if data.get("enablement_artifacts")
+            f"## Documentation To Prepare\n\n{_bullet_list(data.get('documentation_to_prepare', []))}"
+            if data.get("documentation_to_prepare")
             else "",
-            f"## Risks & Dependencies\n\n{_bullet_list(data.get('risks_and_dependencies', []))}"
-            if data.get("risks_and_dependencies")
+            f"## Key Risks & Dependencies\n\n{_bullet_list(data.get('key_risks_and_dependencies', []))}"
+            if data.get("key_risks_and_dependencies")
             else "",
+        ]
+        if section
+    )
+
+
+def _format_business_plan_markdown(plan: Dict[str, object]) -> str:
+    if not isinstance(plan, dict):
+        return ""
+    return "\n\n".join(
+        section
+        for section in [
+            f"## Executive Summary\n\n{plan.get('executive_summary', '')}" if plan.get("executive_summary") else "",
+            f"## Problem & Solution\n\n{plan.get('problem_and_solution', '')}" if plan.get("problem_and_solution") else "",
+            f"## Market Analysis\n\n{plan.get('market_analysis', '')}" if plan.get("market_analysis") else "",
+            f"## Product & Services\n\n{plan.get('product_and_services', '')}" if plan.get("product_and_services") else "",
+            f"## Operations Plan\n\n{plan.get('operations_plan', '')}" if plan.get("operations_plan") else "",
+            f"## Team & Roles\n\n{plan.get('team_and_roles', '')}" if plan.get("team_and_roles") else "",
+            f"## Marketing Strategy\n\n{plan.get('marketing_strategy', '')}" if plan.get("marketing_strategy") else "",
+            f"## Growth Opportunity\n\n{plan.get('growth_opportunity', '')}" if plan.get("growth_opportunity") else "",
+        ]
+        if section
+    )
+
+
+def _format_financial_model_markdown(model: Dict[str, object]) -> str:
+    if not isinstance(model, dict):
+        return ""
+
+    projection = model.get("revenue_projection_usd", {})
+    projection_lines = [
+        f"- Year {key.split('_')[-1]}: {value}"
+        for key, value in projection.items()
+    ]
+
+    return "\n\n".join(
+        section
+        for section in [
+            f"## Revenue Streams\n\n{_bullet_list(model.get('revenue_streams', []))}" if model.get("revenue_streams") else "",
+            f"## Pricing Strategy\n\n{model.get('pricing_strategy', '')}" if model.get("pricing_strategy") else "",
+            f"## Cost Structure\n\n{_bullet_list(model.get('cost_structure', []))}" if model.get("cost_structure") else "",
+            f"## Revenue Projection (USD)\n\n{_bullet_list(projection_lines)}" if projection_lines else "",
+            f"## Profitability Forecast\n\n{model.get('profitability_forecast', '')}" if model.get("profitability_forecast") else "",
+            f"## Funding Needed (USD)\n\n{model.get('funding_needed_usd', '')}" if model.get("funding_needed_usd") else "",
+        ]
+        if section
+    )
+
+
+def _format_investor_readiness_markdown(readiness: Dict[str, object]) -> str:
+    if not isinstance(readiness, dict):
+        return ""
+    return "\n\n".join(
+        section
+        for section in [
+            f"## Funding Round Type\n\n{readiness.get('funding_round_type', '')}" if readiness.get("funding_round_type") else "",
+            f"## Ideal Investor Profile\n\n{readiness.get('ideal_investor_profile', '')}" if readiness.get("ideal_investor_profile") else "",
+            f"## Funding Use Plan\n\n{_bullet_list(readiness.get('funding_use_plan', []))}" if readiness.get("funding_use_plan") else "",
+            f"## Pitch Focus Points\n\n{_bullet_list(readiness.get('pitch_focus_points', []))}" if readiness.get("pitch_focus_points") else "",
+            f"## Risk Analysis\n\n{_bullet_list(readiness.get('risk_analysis', []))}" if readiness.get("risk_analysis") else "",
+            f"## Overall Readiness Score\n\n{readiness.get('overall_readiness_score', '')}" if readiness.get("overall_readiness_score") else "",
         ]
         if section
     )
@@ -587,19 +724,9 @@ def _format_strategy_markdown(data: Dict[str, object]) -> str:
     return "\n\n".join(
         section
         for section in [
-            f"## Vision Statement\n\n{data.get('vision_statement', '')}" if data.get("vision_statement") else "",
-            f"## Market Positioning\n\n{data.get('market_positioning', '')}" if data.get("market_positioning") else "",
-            f"## Go-To-Market\n\n{data.get('go_to_market', '')}" if data.get("go_to_market") else "",
-            f"## Customer Experience\n\n{data.get('customer_experience', '')}" if data.get("customer_experience") else "",
-            f"## Strategic Pillars\n\n{_bullet_list(data.get('strategic_pillars', []))}"
-            if data.get("strategic_pillars")
-            else "",
-            f"## Success Metrics\n\n{_bullet_list(data.get('success_metrics', []))}"
-            if data.get("success_metrics")
-            else "",
-            f"## Partnerships & Alliances\n\n{_bullet_list(data.get('partnerships', []))}"
-            if data.get("partnerships")
-            else "",
+            _format_business_plan_markdown(data.get("business_plan", {})),
+            _format_financial_model_markdown(data.get("financial_model", {})),
+            _format_investor_readiness_markdown(data.get("investor_readiness", {})),
         ]
         if section
     )
@@ -726,21 +853,74 @@ def list_personas() -> List[PersonaDefinition]:
     ]
 
 
+def run_full_journey(prompt: str, clone: FounderClone | None, session_id: str | None = None) -> Tuple[Dict[str, StageResponse], str]:
+    """Execute every stage in order using the provided seed prompt and clone."""
+
+    ordered_infos = sorted(STAGE_REGISTRY.values(), key=lambda info: info.slug.order)
+    context_markdown: str | None = None
+    context_summary: str | None = None
+    context_structured: Dict[str, object] | None = None
+    responses: Dict[str, StageResponse] = {}
+
+    resolved_clone = clone or DEFAULT_CLONE
+
+    for info in ordered_infos:
+        stage_request = StageRequest(
+            prompt=prompt,
+            clone=resolved_clone,
+            session_id=session_id,
+            context_markdown=context_markdown,
+            context_summary=context_summary,
+            context_structured=context_structured,
+        )
+        stage_response = generate_stage(info.slug, stage_request)
+        responses[info.slug.value] = stage_response
+
+        if session_id:
+            session_memory.upsert_stage(session_id, info.slug.value, stage_response)
+
+        context_markdown = stage_response.markdown
+        context_summary = stage_response.summary
+        context_structured = stage_response.structured
+
+    combined = "\n\n---\n\n".join(
+        response.markdown for response in responses.values() if response.markdown
+    )
+    return responses, combined
+
+
 def generate_stage(stage: BusinessStage, payload: StageRequest) -> StageResponse:
     """Execute the configured generator and formatter for the requested stage."""
 
-    persona = PERSONAS[payload.clone]
+    clone_key = payload.clone or DEFAULT_CLONE
+    persona = PERSONAS[clone_key]
     stage_info = STAGE_REGISTRY[stage]
-    keywords = _extract_keywords(payload.prompt, payload.context_markdown or "", payload.context_summary or "")
+    keywords = _extract_keywords(
+        payload.prompt,
+        payload.context_markdown or "",
+        payload.context_summary or "",
+        _structured_to_text(payload.context_structured),
+    )
     context = StageContext(
         prompt=payload.prompt,
         persona=persona,
         keywords=keywords,
         context_markdown=payload.context_markdown,
         context_summary=payload.context_summary,
+        context_structured=payload.context_structured,
     )
 
-    artifacts = stage_info.generator(context)
+    persona_selected = payload.clone is not None
+    llm_structured = generate_stage_structured(
+        stage_info.slug,
+        _persona_snapshot(persona),
+        payload,
+        persona_selected=persona_selected,
+    )
+    if llm_structured:
+        artifacts = StageArtifacts(structured=llm_structured, summary=str(llm_structured.get("summary", "")))
+    else:
+        artifacts = stage_info.generator(context)
     markdown = stage_info.formatter(artifacts.structured)
 
     if not artifacts.summary:

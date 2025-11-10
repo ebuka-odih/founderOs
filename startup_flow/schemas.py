@@ -48,9 +48,9 @@ class StageRequest(BaseModel):
         min_length=10,
         description="Primary startup prompt or idea supplied by the user.",
     )
-    clone: FounderClone = Field(
-        ...,
-        description="Selected founder clone persona that guides the response tone.",
+    clone: Optional[FounderClone] = Field(
+        default=None,
+        description="Optional founder clone persona that guides the response tone.",
     )
     session_id: Optional[str] = Field(
         default=None,
@@ -63,6 +63,10 @@ class StageRequest(BaseModel):
     context_summary: Optional[str] = Field(
         default=None,
         description="Optional short summary derived from a previous stage.",
+    )
+    context_structured: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional structured payload forwarded from a previous stage.",
     )
 
 
@@ -100,3 +104,17 @@ class SessionResponse(BaseModel):
     session_id: str
     stages: Dict[str, StageResponse]
     combined_markdown: str
+
+
+class JourneyRunRequest(BaseModel):
+    """Request payload for running the full journey pipeline."""
+
+    prompt: str = Field(..., min_length=10)
+    clone: Optional[FounderClone] = None
+    session_id: Optional[str] = None
+
+
+class JourneyRunResponse(SessionResponse):
+    """Reuse the session response schema for immediate journey runs."""
+
+    pass

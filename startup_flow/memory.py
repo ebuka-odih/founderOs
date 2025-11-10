@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import DefaultDict, Dict
 
-from .schemas import StageResponse
+from .schemas import BusinessStage, StageResponse
 
 
 class SessionMemory:
@@ -31,11 +31,14 @@ class SessionMemory:
         if not stage_data:
             return None
 
-        ordered_markdown = [
-            data.get("markdown", "")
-            for stage, data in sorted(stage_data.items(), key=lambda item: item[0])
-            if data.get("markdown")
-        ]
+        ordered_markdown = []
+        for stage, data in sorted(
+            stage_data.items(),
+            key=lambda item: BusinessStage(item[0]).order if item[0] in BusinessStage._value2member_map_ else item[0],
+        ):
+            markdown = data.get("markdown")
+            if markdown:
+                ordered_markdown.append(markdown)
         if not ordered_markdown:
             return None
 

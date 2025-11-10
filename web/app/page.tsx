@@ -24,19 +24,26 @@ type FounderClone = {
 
 type StageResult = {
   stage: StageSlug;
+  stage_label: string;
   markdown: string;
   summary: string;
   structured: Record<string, unknown>;
   clone: string;
 };
 
-type StageContext = {
-  markdown: string;
-  summary: string;
-  originStage: StageSlug;
+type JourneyRunResponse = {
+  session_id: string;
+  stages: Record<string, StageResult>;
+  combined_markdown: string;
 };
 
 type ViewMode = "preview" | "raw";
+type PromptHistoryEntry = {
+  id: string;
+  prompt: string;
+  cloneLabel: string;
+  timestamp: number;
+};
 
 const STAGES: StageConfig[] = [
   {
@@ -106,6 +113,8 @@ const FOUNDER_CLONES: FounderClone[] = [
     emoji: "🧭"
   }
 ];
+
+const DEFAULT_CLONE_LABEL = "Nancy";
 
 function clsx(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(" ");
@@ -192,35 +201,59 @@ export default function JourneyWorkspace(): JSX.Element {
     return `session-${Date.now()}`;
   });
   const [prompt, setPrompt] = useState("");
-  const [selectedClone, setSelectedClone] = useState<FounderClone>(FOUNDER_CLONES[0]);
+  const [selectedClone, setSelectedClone] = useState<FounderClone | null>(null);
   const [activeStage, setActiveStage] = useState<StageConfig>(STAGES[0]);
-  const [stageOutputs, setStageOutputs] = useState<Record<StageSlug, StageResult>>({});
-  const [stageContext, setStageContext] = useState<Record<StageSlug, StageContext>>({});
+  const [stageOutputs, setStageOutputs] = useState<Record<StageSlug, StageResult>>(() => ({} as Record<StageSlug, StageResult>));
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasCopied, setHasCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [promptHistory, setPromptHistory] = useState<PromptHistoryEntry[]>([]);
 
   const canGenerate = prompt.trim().length >= 10 && !loading;
-  const currentResult = stageOutputs[activeStage.id];
-  const inheritedContext = stageContext[activeStage.id];
-  const originStageLabel = useMemo(() => {
-    if (!inheritedContext) {
+  const generateDisabledReason = useMemo(() => {
+    if (loading || canGenerate) {
       return null;
     }
-    const origin = STAGES.find((stage) => stage.id === inheritedContext.originStage);
-    return origin?.label ?? inheritedContext.originStage;
-  }, [inheritedContext]);
-  const previewHtml = useMemo(() => {
-    if (!currentResult) {
-      return "";
+    if (prompt.trim().length < 10) {
+      return "Add a bit more detail (10+ characters) to your idea to begin.";
     }
-    return simpleMarkdownToHtml(currentResult.markdown);
-  }, [currentResult]);
+    return null;
+  }, [prompt, canGenerate, loading]);
+  const currentResult = stageOutputs[activeStage.id];
+  const previousStage = useMemo(() => {
+    const currentIndex = STAGES.findIndex((stage) => stage.id === activeStage.id);
+    if (currentIndex <= 0) {
+      return null;
+    }
+    const prevStage = STAGES[currentIndex - 1];
+    const prevResult = stageOutputs[prevStage.id];
+    if (!prevResult) {
+      return null;
+    }
+    return { stage: prevStage, result: prevResult };
+  }, [activeStage, stageOutputs]);
+  const inheritedContext = previousStage
+    ? {
+        markdown: previousStage.result.markdown,
+        summary: previousStage.result.summary,
+        originStage: previousStage.stage.id
+      }
+    : null;
+  const originStageLabel = previousStage?.stage.label ?? null;
+  const previousStructured = previousStage?.result.structured;
+const previewHtml = useMemo(() => {
+  if (!currentResult) {
+    return "";
+  }
+  return simpleMarkdownToHtml(currentResult.markdown);
+}, [currentResult]);
+  const historyItems = promptHistory.slice(0, 10);
 
-  async function handleGenerate() {
+  async function handleRunJourney() {
     if (!canGenerate) {
+      setError("Provide a more detailed prompt to start the journey.");
       return;
     }
     setLoading(true);
@@ -228,57 +261,103 @@ export default function JourneyWorkspace(): JSX.Element {
     setHasCopied(false);
 
     try {
-      const response = await fetch(`${API_BASE}/journey/${activeStage.id}`, {
+      const payload: Record<string, unknown> = {
+        prompt: prompt.trim(),
+        session_id: sessionId
+      };
+      if (selectedClone) {
+        payload.clone = selectedClone.id;
+      }
+
+      const response = await fetch(`${API_BASE}/journey/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          clone: selectedClone.id,
-          session_id: sessionId,
-          context_markdown: inheritedContext?.markdown,
-          context_summary: inheritedContext?.summary
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
         const detail = await response.text();
-        throw new Error(detail || `Unable to generate the ${activeStage.label} stage.`);
+        throw new Error(detail || "Unable to generate the full journey.");
       }
 
-      const data = (await response.json()) as StageResult;
-      setStageOutputs((prev) => ({
-        ...prev,
-        [data.stage]: data
-      }));
+      const data = (await response.json()) as JourneyRunResponse;
+      const normalized = Object.entries(data.stages ?? {}).reduce((acc, [key, value]) => {
+        acc[key as StageSlug] = value as StageResult;
+        return acc;
+      }, {} as Record<StageSlug, StageResult>);
+
+      setStageOutputs(normalized);
+      setActiveStage(STAGES[0]);
+      setViewMode("preview");
+      setPromptHistory((prev) => [
+        {
+          id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `prompt-${Date.now()}`,
+          prompt: prompt.trim(),
+          cloneLabel: selectedClone ? selectedClone.label : `Default (${DEFAULT_CLONE_LABEL})`,
+          timestamp: Date.now()
+        },
+        ...prev
+      ]);
     } catch (fetchError) {
       const message =
-        fetchError instanceof Error ? fetchError.message : "Something went wrong while generating this stage.";
+        fetchError instanceof Error ? fetchError.message : "Something went wrong while generating the journey.";
       setError(message);
     } finally {
       setLoading(false);
     }
   }
 
-  function handleSendToNextStage() {
-    if (!currentResult) {
+  async function handleRegenerateStage() {
+    if (prompt.trim().length < 10) {
+      setError("Add more detail to your prompt before regenerating.");
       return;
     }
-    const currentIndex = STAGES.findIndex((stage) => stage.id === activeStage.id);
-    const nextStage = STAGES[currentIndex + 1];
-    if (!nextStage) {
-      return;
-    }
+    setLoading(true);
+    setError(null);
+    setHasCopied(false);
 
-    setStageContext((prev) => ({
-      ...prev,
-      [nextStage.id]: {
-        markdown: currentResult.markdown,
-        summary: currentResult.summary,
-        originStage: activeStage.id
+    try {
+      const regenPayload: Record<string, unknown> = {
+        prompt: prompt.trim(),
+        session_id: sessionId
+      };
+      const resolvedClone = selectedClone?.id ?? currentResult?.clone ?? null;
+      if (resolvedClone) {
+        regenPayload.clone = resolvedClone;
       }
-    }));
-    setActiveStage(nextStage);
-    setViewMode("preview");
+      if (inheritedContext?.markdown) {
+        regenPayload.context_markdown = inheritedContext.markdown;
+      }
+      if (inheritedContext?.summary) {
+        regenPayload.context_summary = inheritedContext.summary;
+      }
+      if (previousStructured) {
+        regenPayload.context_structured = previousStructured;
+      }
+
+      const response = await fetch(`${API_BASE}/journey/${activeStage.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(regenPayload)
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Unable to regenerate the ${activeStage.label} stage.`);
+      }
+
+      const data = (await response.json()) as StageResult;
+      setStageOutputs((prev) => ({
+        ...prev,
+        [data.stage as StageSlug]: data
+      }));
+    } catch (fetchError) {
+      const message =
+        fetchError instanceof Error ? fetchError.message : "Something went wrong while regenerating this stage.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleCopyMarkdown() {
@@ -357,12 +436,15 @@ export default function JourneyWorkspace(): JSX.Element {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-textMuted">Founder Clones</h2>
             <div className="mt-4 grid gap-3">
               {FOUNDER_CLONES.map((clone) => {
-                const active = clone.id === selectedClone.id;
+                const active = clone.id === selectedClone?.id;
                 return (
                   <button
                     key={clone.id}
                     type="button"
-                    onClick={() => setSelectedClone(clone)}
+                    onClick={() => {
+                      setSelectedClone(clone);
+                      setError(null);
+                    }}
                     className={clsx(
                       "flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition",
                       active ? "border-accent bg-accentSoft shadow-sm" : "border-borderLight hover:border-accent"
@@ -407,6 +489,31 @@ export default function JourneyWorkspace(): JSX.Element {
               })}
             </ul>
           </div>
+
+          <div className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-textMuted">Idea History</h2>
+            {historyItems.length === 0 ? (
+              <p className="mt-4 text-xs text-textMuted">Your prompts will appear here after you run the journey.</p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {historyItems.map((entry) => (
+                  <li key={entry.id} className="rounded-xl border border-borderLight px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-textMuted">
+                      {new Date(entry.timestamp).toLocaleString(undefined, {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
+                      {" · "}
+                      {entry.cloneLabel}
+                    </p>
+                    <p className="mt-1 text-sm text-textPrimary" style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                      {entry.prompt}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </aside>
 
         <main className="flex-1 space-y-6">
@@ -419,7 +526,10 @@ export default function JourneyWorkspace(): JSX.Element {
                 </h2>
               </div>
               <div className="text-xs text-textMuted">
-                Active clone: <span className="font-semibold text-textPrimary">{selectedClone.label}</span>
+                Active clone:{" "}
+                <span className="font-semibold text-textPrimary">
+                  {selectedClone ? selectedClone.label : `Default (${DEFAULT_CLONE_LABEL})`}
+                </span>
               </div>
             </div>
             <textarea
@@ -436,14 +546,14 @@ export default function JourneyWorkspace(): JSX.Element {
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={handleGenerate}
+                onClick={handleRunJourney}
                 disabled={!canGenerate}
                 className={clsx(
                   "flex items-center gap-2 rounded-xl bg-accent px-5 py-2 text-sm font-semibold text-white shadow-sm transition",
                   !canGenerate && "cursor-not-allowed opacity-60"
                 )}
               >
-                ⚡ Generate
+                ⚡ Generate Journey
                 {loading ? <span className="text-xs text-accentSoft">working…</span> : null}
               </button>
               <button
@@ -459,6 +569,11 @@ export default function JourneyWorkspace(): JSX.Element {
                 {downloading ? <span className="ml-2 text-xs text-textMuted">preparing…</span> : null}
               </button>
             </div>
+            {!canGenerate && generateDisabledReason ? (
+              <p className="mt-2 text-xs text-textMuted" aria-live="polite">
+                {generateDisabledReason}
+              </p>
+            ) : null}
           </section>
 
           <section className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
@@ -531,14 +646,14 @@ export default function JourneyWorkspace(): JSX.Element {
                   </button>
                   <button
                     type="button"
-                    onClick={handleSendToNextStage}
-                    disabled={!currentResult || activeStage.id === STAGES[STAGES.length - 1].id}
+                    onClick={handleRegenerateStage}
+                    disabled={loading}
                     className={clsx(
                       "rounded-lg border border-borderLight px-3 py-1.5 text-xs font-semibold text-textMuted transition hover:text-textPrimary",
-                      (!currentResult || activeStage.id === STAGES[STAGES.length - 1].id) && "cursor-not-allowed opacity-50"
+                      loading && "cursor-not-allowed opacity-50"
                     )}
                   >
-                    Send to Next Stage →
+                    {loading ? "Working…" : "Regenerate Stage"}
                   </button>
                 </div>
               </header>
