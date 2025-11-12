@@ -15,7 +15,7 @@ type StageConfig = {
 };
 
 type FounderClone = {
-  id: "elon" | "jeff" | "nancy";
+  id: "none" | "elon" | "jeff" | "nancy";
   label: string;
   focus: string;
   description: string;
@@ -92,6 +92,13 @@ const STAGES: StageConfig[] = [
 
 const FOUNDER_CLONES: FounderClone[] = [
   {
+    id: "none",
+    label: "None",
+    focus: "Default",
+    description: "No specific founder clone selected.",
+    emoji: "🤖"
+  },
+  {
     id: "elon",
     label: "Elon",
     focus: "Vision",
@@ -114,7 +121,7 @@ const FOUNDER_CLONES: FounderClone[] = [
   }
 ];
 
-const DEFAULT_CLONE_LABEL = "Nancy";
+const DEFAULT_CLONE = FOUNDER_CLONES.find(clone => clone.id === "none")!;
 
 function clsx(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(" ");
@@ -201,7 +208,7 @@ export default function JourneyWorkspace(): JSX.Element {
     return `session-${Date.now()}`;
   });
   const [prompt, setPrompt] = useState("");
-  const [selectedClone, setSelectedClone] = useState<FounderClone | null>(null);
+  const [selectedClone, setSelectedClone] = useState<FounderClone>(DEFAULT_CLONE);
   const [activeStage, setActiveStage] = useState<StageConfig>(STAGES[0]);
   const [stageOutputs, setStageOutputs] = useState<Record<StageSlug, StageResult>>(() => ({} as Record<StageSlug, StageResult>));
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
@@ -265,7 +272,7 @@ const previewHtml = useMemo(() => {
         prompt: prompt.trim(),
         session_id: sessionId
       };
-      if (selectedClone) {
+      if (selectedClone.id !== "none") {
         payload.clone = selectedClone.id;
       }
 
@@ -293,7 +300,7 @@ const previewHtml = useMemo(() => {
         {
           id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `prompt-${Date.now()}`,
           prompt: prompt.trim(),
-          cloneLabel: selectedClone ? selectedClone.label : `Default (${DEFAULT_CLONE_LABEL})`,
+          cloneLabel: selectedClone.label,
           timestamp: Date.now()
         },
         ...prev
@@ -321,7 +328,7 @@ const previewHtml = useMemo(() => {
         prompt: prompt.trim(),
         session_id: sessionId
       };
-      const resolvedClone = selectedClone?.id ?? currentResult?.clone ?? null;
+      const resolvedClone = selectedClone.id !== "none" ? selectedClone.id : currentResult?.clone ?? null;
       if (resolvedClone) {
         regenPayload.clone = resolvedClone;
       }
@@ -411,60 +418,117 @@ const previewHtml = useMemo(() => {
 
   return (
     <div className="min-h-screen bg-muted">
-      <div className="mx-auto flex max-w-6xl flex-col gap-10 px-6 py-10 lg:flex-row">
-        <aside className="w-full space-y-6 lg:w-72">
-          <div className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-wide text-textMuted">FounderOs</p>
-                <h1 className="mt-1 text-2xl font-semibold text-textPrimary">Startup Journey Lab</h1>
-              </div>
-              <span className="text-3xl" role="img" aria-label="sparkles">
-                ✨
-              </span>
+      <div className="mx-auto max-w-6xl px-4 py-2 lg:px-6 lg:py-4">
+        <div className="rounded-2xl border border-borderLight bg-surface p-4 lg:p-6 shadow-sm mb-2 lg:mb-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-textMuted">FounderOs</p>
+              <h1 className="mt-1 text-2xl font-semibold text-textPrimary">Startup Journey Lab</h1>
             </div>
-            <p className="mt-4 text-sm leading-relaxed text-textMuted">
-              Work through each stage of the journey with guided outputs. Pass insights forward, compare personas, and
-              export everything as Markdown.
+            <span className="text-3xl" role="img" aria-label="sparkles">
+              ✨
+            </span>
+          </div>
+          <p className="mt-4 text-sm leading-relaxed text-textMuted">
+            Work through each stage of the journey with guided outputs. Pass insights forward, compare personas, and
+            export everything as Markdown.
+          </p>
+        </div>
+
+        <section className="rounded-2xl border border-borderLight bg-surface p-4 lg:p-6 shadow-sm mb-2 lg:mb-4">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-textMuted">Prompt Input</p>
+            <h2 className="text-xl font-semibold text-textPrimary">
+              Describe your business idea
+            </h2>
+            <p className="text-sm text-textMuted mt-1">
+              Choose a founder clone and share your idea to get AI-powered startup guidance through the full journey.
             </p>
-            <div className="mt-4 rounded-lg bg-accentSoft px-3 py-2 text-xs text-accent">
-              Session ID: <span className="font-mono">{sessionId}</span>
+          </div>
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="Outline the idea, goals, or constraints you want the founder clone to process."
+            className="mt-4 h-32 w-full resize-none rounded-xl border border-borderLight bg-muted px-4 py-3 text-sm text-textPrimary placeholder:text-textMuted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+          />
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="clone-select" className="block text-sm font-medium text-textPrimary mb-2">
+                Select Founder Clone
+              </label>
+              <select
+                id="clone-select"
+                value={selectedClone.id}
+                onChange={(e) => {
+                  const clone = FOUNDER_CLONES.find(c => c.id === e.target.value);
+                  if (clone) {
+                    setSelectedClone(clone);
+                    setError(null);
+                  }
+                }}
+                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {FOUNDER_CLONES.map((clone) => (
+                  <option key={clone.id} value={clone.id}>
+                    {clone.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="file-upload" className="block text-sm font-medium text-textPrimary mb-2">
+                Upload File (Optional)
+              </label>
+              <input
+                id="file-upload"
+                type="file"
+                accept=".pdf,.doc,.docx,.txt,.md"
+                className="w-full text-sm text-textPrimary file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-accent file:text-white hover:file:bg-accent/90"
+              />
             </div>
           </div>
-
-          <div className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-textMuted">Founder Clones</h2>
-            <div className="mt-4 grid gap-3">
-              {FOUNDER_CLONES.map((clone) => {
-                const active = clone.id === selectedClone?.id;
-                return (
-                  <button
-                    key={clone.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedClone(clone);
-                      setError(null);
-                    }}
-                    className={clsx(
-                      "flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition",
-                      active ? "border-accent bg-accentSoft shadow-sm" : "border-borderLight hover:border-accent"
-                    )}
-                  >
-                    <span className="text-xl">{clone.emoji}</span>
-                    <span className="flex-1">
-                      <span className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-textPrimary">{clone.label}</span>
-                        <span className="text-xs uppercase tracking-wide text-accent">{clone.focus}</span>
-                      </span>
-                      <span className="mt-1 block text-xs text-textMuted">{clone.description}</span>
-                    </span>
-                  </button>
-                );
-              })}
+          {error ? (
+            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              {error}
             </div>
+          ) : null}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleRunJourney}
+              disabled={!canGenerate}
+              className={clsx(
+                "flex items-center gap-2 rounded-xl bg-accent px-5 py-2 text-sm font-semibold text-white shadow-sm transition",
+                !canGenerate && "cursor-not-allowed opacity-60"
+              )}
+            >
+              ⚡ Generate Journey
+              {loading ? <span className="text-xs text-accentSoft">working…</span> : null}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadSession}
+              disabled={!Object.keys(stageOutputs).length || downloading}
+              className={clsx(
+                "rounded-xl border border-borderLight px-4 py-2 text-sm text-textPrimary transition hover:border-accent hover:text-accent",
+                (!Object.keys(stageOutputs).length || downloading) && "cursor-not-allowed opacity-60"
+              )}
+            >
+              ⬇️ Export Markdown
+              {downloading ? <span className="ml-2 text-xs text-textMuted">preparing…</span> : null}
+            </button>
           </div>
+          {!canGenerate && generateDisabledReason ? (
+            <p className="mt-2 text-xs text-textMuted" aria-live="polite">
+              {generateDisabledReason}
+            </p>
+          ) : null}
+        </section>
+      </div>
 
-          <div className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 lg:gap-10 lg:px-6 lg:py-10 lg:flex-row">
+        <aside className="w-full space-y-2 lg:w-72">
+          <div className="hidden lg:block rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-textMuted">Stage Flow</h2>
             <ul className="mt-4 space-y-4">
               {STAGES.map((stage) => {
@@ -490,7 +554,7 @@ const previewHtml = useMemo(() => {
             </ul>
           </div>
 
-          <div className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
+          <div className="hidden lg:block rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-textMuted">Idea History</h2>
             {historyItems.length === 0 ? (
               <p className="mt-4 text-xs text-textMuted">Your prompts will appear here after you run the journey.</p>
@@ -516,69 +580,10 @@ const previewHtml = useMemo(() => {
           </div>
         </aside>
 
-        <main className="flex-1 space-y-6">
-          <section className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-textMuted">Prompt Input</p>
-                <h2 className="text-xl font-semibold text-textPrimary">
-                  Describe what you want the system to generate…
-                </h2>
-              </div>
-              <div className="text-xs text-textMuted">
-                Active clone:{" "}
-                <span className="font-semibold text-textPrimary">
-                  {selectedClone ? selectedClone.label : `Default (${DEFAULT_CLONE_LABEL})`}
-                </span>
-              </div>
-            </div>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Outline the idea, goals, or constraints you want the founder clone to process."
-              className="mt-4 h-32 w-full resize-none rounded-xl border border-borderLight bg-muted px-4 py-3 text-sm text-textPrimary placeholder:text-textMuted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-            />
-            {error ? (
-              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-                {error}
-              </div>
-            ) : null}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={handleRunJourney}
-                disabled={!canGenerate}
-                className={clsx(
-                  "flex items-center gap-2 rounded-xl bg-accent px-5 py-2 text-sm font-semibold text-white shadow-sm transition",
-                  !canGenerate && "cursor-not-allowed opacity-60"
-                )}
-              >
-                ⚡ Generate Journey
-                {loading ? <span className="text-xs text-accentSoft">working…</span> : null}
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadSession}
-                disabled={!Object.keys(stageOutputs).length || downloading}
-                className={clsx(
-                  "rounded-xl border border-borderLight px-4 py-2 text-sm text-textPrimary transition hover:border-accent hover:text-accent",
-                  (!Object.keys(stageOutputs).length || downloading) && "cursor-not-allowed opacity-60"
-                )}
-              >
-                ⬇️ Export Markdown
-                {downloading ? <span className="ml-2 text-xs text-textMuted">preparing…</span> : null}
-              </button>
-            </div>
-            {!canGenerate && generateDisabledReason ? (
-              <p className="mt-2 text-xs text-textMuted" aria-live="polite">
-                {generateDisabledReason}
-              </p>
-            ) : null}
-          </section>
-
+        <main className="flex-1 space-y-2">
           <section className="rounded-2xl border border-borderLight bg-surface p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {STAGES.map((stage) => {
                   const active = stage.id === activeStage.id;
                   return (
@@ -681,6 +686,31 @@ const previewHtml = useMemo(() => {
                 )}
               </div>
             </div>
+          </section>
+
+          <section className="lg:hidden rounded-2xl border border-borderLight bg-surface p-4 shadow-sm">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-textMuted">Idea History</h2>
+            {historyItems.length === 0 ? (
+              <p className="mt-4 text-xs text-textMuted">Your prompts will appear here after you run the journey.</p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {historyItems.map((entry) => (
+                  <li key={entry.id} className="rounded-xl border border-borderLight px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-textMuted">
+                      {new Date(entry.timestamp).toLocaleString(undefined, {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
+                      {" · "}
+                      {entry.cloneLabel}
+                    </p>
+                    <p className="mt-1 text-sm text-textPrimary" style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                      {entry.prompt}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         </main>
       </div>
